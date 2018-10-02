@@ -21,17 +21,17 @@ class Trackers:
         self.init_trackers_amount = len(self.trackers)
 
     def create_trackers(self, frame, bbox):
-        small_w = (bbox[2] - bbox[0]) // 7
-        small_h = (bbox[3] - bbox[1]) // 7
-        big_w = (bbox[2] - bbox[0]) // 4
-        big_h = (bbox[3] - bbox[1]) // 4
-        for x1 in range(bbox[0], bbox[2] - small_w, small_w):
-            for y1 in range(bbox[1], bbox[3] - small_h, small_h):
+        small_w = (bbox[2] - bbox[0]) // 4
+        small_h = (bbox[3] - bbox[1]) // 4
+        big_w = (bbox[2] - bbox[0]) // 3
+        big_h = (bbox[3] - bbox[1]) // 3
+        for x1 in range(bbox[0], bbox[2], small_w):
+            for y1 in range(bbox[1], bbox[3], small_h):
                 tracker = BlockMatching(frame,
                                         (x1, y1, x1 + small_w, y1 + small_h))
                 self.trackers.append(tracker)
-        for x1 in range(bbox[0], bbox[2] - big_w, big_w):
-            for y1 in range(bbox[1], bbox[3] - big_h, big_h):
+        for x1 in range(bbox[0], bbox[2], big_w):
+            for y1 in range(bbox[1], bbox[3], big_h):
                 tracker = BlockMatching(frame, (x1, y1, x1 + big_w, y1 + big_h))
                 self.trackers.append(tracker)
         for i in range(len(self.trackers) - 1, -1, -1):
@@ -58,33 +58,35 @@ class Trackers:
                              abs(self.trackers[j].cur_vector[1] - y))
                 if length >= delta:
                     self.trackers.pop(j)
+                elif length >= 2:
+                    self.trackers[j].weight *= (delta - length + 25) / (delta + 25)
                 else:
-                    if length >= 1:
-                        self.trackers[j].weight *= (delta - length) / (
-                                    delta)
-                    else:
-                        self.trackers[j].weight += 1
+                    self.trackers[j].update_weight()
 
     def check_transition(self, frame, x, y):
         delta = 7
         for j in range(len(self.trackers) - 1, -1, -1):
             if self.trackers[j].state == State.TRANSITION:
                 v_x, v_y, _, _ = self.trackers[j].get_motion_vector(frame)
+                print(j+1, len(self.trackers))
                 length = max(abs(v_x - x), abs(v_y - y))
                 if length >= delta:
                     self.trackers[j].state = State.OUTLIER
-                elif length >= 1:
-                    self.trackers[j].weight *= (delta - length) / (delta)
+                    print('\tout', v_x, v_y, length)
                 else:
-                    self.trackers[j].weight += 1
                     self.trackers[j].transition_count += 1
+                    print('\tpassed', v_x, v_y, length, self.trackers[j].transition_count)
+                    if length >= 2:
+                        self.trackers[j].weight *= (delta - length + 25) / (delta + 25)
+                    else:
+                        self.trackers[j].update_weight()
 
     def update(self, frame):
         self.vectors = []
         self.rectangles = []
         self.new_rects = []
         self.debug_color = []
-        tracker_iter = 0
+        tracker_iter = 1
         for tracker in self.trackers:
             if tracker.state == State.TRANSITION and tracker.transition_count >= 2:
                 tracker.state = State.INLIER
@@ -104,17 +106,17 @@ class Trackers:
                                             self.debug_color, self.vectors):
             cv2.rectangle(frame, *rectangle, color=(255, color, 0))
             # cv2.rectangle(frame, *new_rect, color=(255, color, 0))
-            x = (rectangle[1][0] + rectangle[0][0]) // 2
-            y = (rectangle[1][1] + rectangle[0][1]) // 2
-            cv2.line(frame, (x, y), (x + vector[0], y + vector[1]),
-                     color=(0, 0, 255))
+            # x = (rectangle[1][0] + rectangle[0][0]) // 2
+            # y = (rectangle[1][1] + rectangle[0][1]) // 2
+            # cv2.line(frame, (x, y), (x + vector[0], y + vector[1]),
+            #          color=(0, 0, 255))
 
-    def reinit(self, frame, bbox):
+    def reinit(self, frame, bbox, x, y):
         _amount = 0
         for tracker in self.trackers:
             if tracker.state in [State.INLIER, State.TRANSITION]:
                 _amount += 1
         print('\t{} {} {}'.format(_amount, self.init_trackers_amount,
                                   _amount / self.init_trackers_amount))
-        if _amount / self.init_trackers_amount <= 0.25:
+        if _amount / self.init_trackers_amount <= 0.4:
             self.create_trackers(frame, bbox)

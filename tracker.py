@@ -1,6 +1,7 @@
 from enum import Enum
 from operator import sub
 import cv2
+import numpy as np
 
 
 class State(Enum):
@@ -27,8 +28,8 @@ class BlockMatching:
         print(self.x_offset, self.y_offset, self.cur_wnd)
 
     def update_cur_wnd(self, frame):
-        w = int(self.width * 4)
-        h = int(self.height * 4)
+        w = int(self.width * 1)
+        h = int(self.height * 1)
         self.cur_wnd = [0 if self.cur_bbox[0] - w < 0 else self.cur_bbox[0] - w,
                         0 if self.cur_bbox[1] - h < 0 else self.cur_bbox[1] - h,
                         frame.shape[1] if self.cur_bbox[2] + w > frame.shape[
@@ -38,7 +39,13 @@ class BlockMatching:
         self.x_offset = self.cur_wnd[2] - self.cur_wnd[0] - self.width
         self.y_offset = self.cur_wnd[3] - self.cur_wnd[1] - self.height
 
-    def error_function(self, possible_cluster):
+    def update_weight(self):
+        if self.weight >= 2:
+            self.weight = 2
+        else:
+            self.weight += 0.1 / self.weight
+
+    def error_function1(self, possible_cluster):
         error = 0
         for y in range(self.current_cluster.shape[1]):
             for x in range(self.current_cluster.shape[0]):
@@ -46,6 +53,17 @@ class BlockMatching:
                 pix2 = possible_cluster[x][y]
                 error += abs(pix1[0] - pix2[0]) + abs(pix1[1] - pix2[1]) + \
                          abs(pix1[2] - pix2[2])
+        return error
+
+    def error_function(self, possible_cluster):
+        error = 0
+        for y in range(self.current_cluster.shape[1]):
+            for x in range(self.current_cluster.shape[0]):
+                pix1 = self.current_cluster[x][y]
+                pix2 = possible_cluster[x][y]
+                error += np.sqrt((pix1[0] - pix2[0]) ** 2 +
+                                 (pix1[1] - pix2[1]) ** 2 +
+                                 (pix1[2] - pix2[2]) ** 2)
         return error
 
     def get_motion_vector(self, frame):
