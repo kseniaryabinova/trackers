@@ -1,2 +1,2 @@
-# Tracker BDF
-Implementation of Best Displacement Flow tracker
+# Tracker KCF
+Implementation of Kernelized Correlation Filter tracker

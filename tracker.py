@@ -1,86 +1,170 @@
-from enum import Enum
-from operator import sub
 import cv2
 import numpy as np
 
-
-class State(Enum):
-    INLIER = 1
-    OUTLIER = 2
-    TRANSITION = 3
+from hog import HOG
+from utils import show
 
 
-class BlockMatching:
-    def __init__(self, frame, bbox: tuple):
-        self.state = State.TRANSITION
-        self.transition_count = 0
-        self.current_cluster = frame[bbox[1]:bbox[3], bbox[0]:bbox[2]]
-        self.cur_bbox = bbox
-        self.cur_vector = (0, 0)
-        self.weight = 1
+class KCF:
+    def __init__(self, image, coords):
+        """
+        :param image: initial image with ROI
+        :param coords: [x1, y1, x2, y2]
+        """
+        self._lambda = 0.0001
+        self._sigma = 0.6
+        self.image_size = image.shape
+        self._interp_factor = 0.012
+        self._hog = HOG()
 
-        self.width = bbox[2] - bbox[0]
-        self.height = bbox[3] - bbox[1]
-        self.cur_wnd = None
-        self.x_offset = None
-        self.y_offset = None
-        self.update_cur_wnd(frame)
-        print(self.x_offset, self.y_offset, self.cur_wnd)
+        self._roi = coords
+        sub_wnd_coords = self._make_subwindow()
+        self._sub_wnd_size = (sub_wnd_coords[2] - sub_wnd_coords[0],
+                              sub_wnd_coords[3] - sub_wnd_coords[1])
+        self._sub_wnd_coords = sub_wnd_coords
 
-    def update_cur_wnd(self, frame):
-        w = int(self.width * 1)
-        h = int(self.height * 1)
-        self.cur_wnd = [0 if self.cur_bbox[0] - w < 0 else self.cur_bbox[0] - w,
-                        0 if self.cur_bbox[1] - h < 0 else self.cur_bbox[1] - h,
-                        frame.shape[1] if self.cur_bbox[2] + w > frame.shape[
-                            1] else self.cur_bbox[2] + w,
-                        frame.shape[0] if self.cur_bbox[3] + h > frame.shape[
-                            0] else self.cur_bbox[3] + h]
-        self.x_offset = self.cur_wnd[2] - self.cur_wnd[0] - self.width
-        self.y_offset = self.cur_wnd[3] - self.cur_wnd[1] - self.height
+        self._y = self._make_y_values(self._hog.hog_size[0],
+                                      self._hog.hog_size[1])
 
-    def update_weight(self):
-        if self.weight >= 2:
-            self.weight = 2
-        else:
-            self.weight += 0.1 / self.weight
+        self._x_hog = self._hog.compute(image[
+                                        sub_wnd_coords[0]:sub_wnd_coords[2],
+                                        sub_wnd_coords[1]:sub_wnd_coords[3]
+                                        ])
 
-    def error_function1(self, possible_cluster):
-        error = 0
-        for y in range(self.current_cluster.shape[1]):
-            for x in range(self.current_cluster.shape[0]):
-                pix1 = self.current_cluster[x][y]
-                pix2 = possible_cluster[x][y]
-                error += abs(pix1[0] - pix2[0]) + abs(pix1[1] - pix2[1]) + \
-                         abs(pix1[2] - pix2[2])
-        return error
+        self._alpha = self._train(self._x_hog, True)
 
-    def error_function(self, possible_cluster):
-        error = 0
-        for y in range(self.current_cluster.shape[1]):
-            for x in range(self.current_cluster.shape[0]):
-                pix1 = self.current_cluster[x][y]
-                pix2 = possible_cluster[x][y]
-                error += np.sqrt((pix1[0] - pix2[0]) ** 2 +
-                                 (pix1[1] - pix2[1]) ** 2 +
-                                 (pix1[2] - pix2[2]) ** 2)
-        return error
+    def _make_y_values(self, w, h):
+        c = np.sqrt(w * h) / 15
 
-    def get_motion_vector(self, frame):
-        possibilities = {}
-        for y in range(self.cur_wnd[1], self.cur_wnd[1] + self.y_offset):
-            for x in range(self.cur_wnd[0], self.cur_wnd[0] + self.x_offset):
-                error = self.error_function(
-                    frame[y:self.height + y, x:self.width + x])
-                possibilities[(x, y)] = error
+        result = np.zeros((w, h))
 
-        v_x, v_y = min(possibilities, key=possibilities.get)
-        v_x, v_y = v_x - self.cur_bbox[0], v_y - self.cur_bbox[1]
-        self.cur_bbox = (self.cur_bbox[0] + v_x, self.cur_bbox[1] + v_y,
-                         self.cur_bbox[2] + v_x, self.cur_bbox[3] + v_y)
-        self.update_cur_wnd(frame)
-        self.current_cluster = frame[self.cur_bbox[1]:self.cur_bbox[3],
-                               self.cur_bbox[0]:self.cur_bbox[2]]
-        self.cur_vector = (v_x, v_y)
-        return v_x, v_y, (self.cur_bbox[0], self.cur_bbox[1]), \
-               (self.cur_bbox[2], self.cur_bbox[3])
+        mid_x = w // 2
+        mid_y = h // 2
+
+        for x in range(w):
+            for y in range(h):
+                result[x, y] = np.exp(-((mid_x - x) ** 2 / (2 * c ** 2) +
+                                        (mid_y - y) ** 2 / (2 * c ** 2)))
+
+        return result
+
+    def _make_subwindow(self):
+        """
+        возвращает координаты subwindow
+        :return: [x1, y1, x2, y2]
+        """
+        margin = 0.75
+        w = margin * (self._roi[2] - self._roi[0])
+        h = margin * (self._roi[3] - self._roi[1])
+
+        sub_wnd_coords = [self._roi[0] - w, self._roi[1] - h,
+                          self._roi[2] + w, self._roi[3] + h]
+
+        # если выходит за границы изображения:
+        if sub_wnd_coords[0] <= 0:
+            sub_wnd_coords[0] = 1
+        if sub_wnd_coords[1] <= 0:
+            sub_wnd_coords[1] = 1
+        if sub_wnd_coords[2] >= self.image_size[1]:
+            sub_wnd_coords[2] = self.image_size[1] - 1
+        if sub_wnd_coords[3] >= self.image_size[0]:
+            sub_wnd_coords[3] = self.image_size[0] - 1
+
+        return int(sub_wnd_coords[0]), int(sub_wnd_coords[1]), \
+               int(sub_wnd_coords[2]), int(sub_wnd_coords[3])
+
+    def update(self, image):
+        new_roi = self._detect(image)
+        self._roi = (int(new_roi[0]), int(new_roi[1]),
+                     int(new_roi[0] + (self._roi[2] - self._roi[0])),
+                     int(new_roi[1] + (self._roi[3] - self._roi[1])))
+        sub_wnd_coords = self._make_subwindow()
+        self._sub_wnd_size = (sub_wnd_coords[2] - sub_wnd_coords[0],
+                              sub_wnd_coords[3] - sub_wnd_coords[1])
+        self._sub_wnd_coords = sub_wnd_coords
+
+        self._x_hog = self._hog.compute(
+            image[sub_wnd_coords[0]:sub_wnd_coords[2],
+            sub_wnd_coords[1]:sub_wnd_coords[3]])
+
+        self._alpha = self._train(self._x_hog, False)
+        return self._roi
+
+    def _train(self, new_hog, is_first_time):
+        k = self._find_gaussian_kernel(new_hog, new_hog)
+        alpha = self._y / (np.fft.fft(k) + self._lambda)
+
+        show(np.real(k), 'train_kernel')
+        show(np.real(alpha), 'train_alpha')
+
+        if is_first_time:
+            return alpha
+        return (1 - self._interp_factor) * self._alpha + \
+               self._interp_factor * alpha
+
+    def _detect(self, image):
+        # FIXME какой-то баг с корреляцией
+        z_coords = self._make_subwindow()
+        z = image[z_coords[0]:z_coords[2], z_coords[1]:z_coords[3]]
+        z_hog = self._hog.compute(z)
+
+        k_xz = self._find_gaussian_kernel(self._x_hog, z_hog)
+        f_z = np.fft.ifft(np.multiply(np.fft.fft(k_xz), self._alpha))
+
+        show(np.real(k_xz), '_detect_k_xz')
+        show(np.real(f_z), '_detect_correlation')
+
+        exit(0)
+        _, max_val, _, max_loc = cv2.minMaxLoc(f_z)
+        print(max_val, max_loc)
+        return self._get_coords(max_loc)
+
+    def _get_coords(self, max_loc):
+        hog_row = max_loc[1] // self._hog.hog_size[0]
+        hog_col = max_loc[0] % self._hog.hog_size[1]
+
+        scale_row = hog_row * self._hog.pixels_per_cell[0] + \
+                    self._hog.pixels_per_cell[0] // 2
+        scale_col = hog_col * self._hog.pixels_per_cell[1] + \
+                    self._hog.pixels_per_cell[1] // 2
+
+        sub_wnd_row = (self._hog.wnd_size[0]+(self._sub_wnd_size[0]))/scale_row
+        sub_wnd_col = (self._hog.wnd_size[1]+(self._sub_wnd_size[1]))/scale_col
+
+        sub_wnd_row -= (self._roi[2] - self._roi[0]) / 4
+        sub_wnd_col -= (self._roi[3] - self._roi[1]) / 4
+
+        return self._sub_wnd_coords[0] + sub_wnd_row, \
+               self._sub_wnd_coords[1] + sub_wnd_col
+
+    def _find_gaussian_kernel(self, x, y):
+        def rearrange(arr, w, h):
+            mid_x = w // 2
+            mid_y = h // 2
+
+            res = np.zeros((w, h), dtype=np.complex)
+            res[mid_x:mid_x * 2, mid_y:mid_y * 2] = arr[0:mid_x, 0:mid_y]
+            res[0:mid_x, 0:mid_y] = arr[mid_x:mid_x * 2, mid_y:mid_y * 2]
+            res[0:mid_x, mid_y:mid_y * 2] = arr[mid_x:mid_x * 2, 0:mid_y]
+            res[mid_x:mid_x * 2, 0:mid_y] = arr[0:mid_x, mid_y:mid_y * 2]
+
+            return res
+
+        correlation = np.zeros([self._hog.hog_size[0], self._hog.hog_size[1]],
+                               dtype=np.complex)
+        for i in range(self._hog.hog_size[2]):
+            x_fft = np.fft.fft(x[:, :, i])
+            y_fft = np.fft.fft(y[:, :, i])
+            result = np.multiply(np.conj(x_fft), y_fft)
+            correlation = np.add(correlation, result)
+
+        correlation = rearrange(correlation,
+                                correlation.shape[1], correlation.shape[0])
+
+        norm1 = np.multiply(x, x).sum()
+        norm2 = np.multiply(y, y).sum()
+        result = (norm1 + norm2 -
+                  2 * np.real(np.fft.ifft(correlation))) / \
+                 (self._hog.hog_size[0] * self._hog.hog_size[1] * self._hog.hog_size[2])
+
+        return np.exp(-1 / (self._sigma ** 2) * result)
