@@ -107,8 +107,8 @@ class KCF:
         k = self._find_gaussian_kernel(new_hog, new_hog)
         alpha = self._y / (np.fft.fft(k) / k.shape[1] + self._lambda)
 
-        show(np.real(k), 'train_kernel')
-        show(np.real(alpha), 'train_alpha')
+        # show(np.real(k), 'train_kernel')
+        # show(np.real(alpha), 'train_alpha')
 
         if is_first_time:
             return alpha
@@ -124,30 +124,26 @@ class KCF:
         k_xz = self._find_gaussian_kernel(self._x_hog, z_hog)
         f_z = np.fft.ifft(np.multiply(np.fft.fft(k_xz), self._alpha))
 
-        show(np.real(k_xz), '_detect_k_xz')
-        show(np.real(f_z), '_detect_correlation')
+        # show(np.real(k_xz), '_detect_k_xz')
+        # show(np.real(f_z), '_detect_correlation')
 
         _, max_val, _, max_loc = cv2.minMaxLoc(f_z.real)
         print(max_val, max_loc)
         return self._get_coords(max_loc)
 
     def _get_coords(self, max_loc):
-        hog_row = max_loc[1] // self._hog.hog_size[0]
-        hog_col = max_loc[0] % self._hog.hog_size[1]
+        new_center = (max_loc[0] * self._hog.pixels_per_cell[0],
+                      max_loc[1] * self._hog.pixels_per_cell[1])
 
-        scale_row = hog_row * self._hog.pixels_per_cell[0] + \
-                    self._hog.pixels_per_cell[0] // 2
-        scale_col = hog_col * self._hog.pixels_per_cell[1] + \
-                    self._hog.pixels_per_cell[1] // 2
+        scale = self._sub_wnd_size[0] / self._hog.wnd_size[0]
 
-        sub_wnd_row = (self._hog.wnd_size[0]+(self._sub_wnd_size[0]))/scale_row
-        sub_wnd_col = (self._hog.wnd_size[1]+(self._sub_wnd_size[1]))/scale_col
+        new_center = (new_center[0] * scale + self._sub_wnd_coords[0],
+                      new_center[1] * scale + self._sub_wnd_coords[1])
+        new_w = self.image_size[0] / 2 - new_center[0]
+        new_h = self.image_size[1] / 2 - new_center[1]
 
-        sub_wnd_row -= (self._roi[2] - self._roi[0]) / 4
-        sub_wnd_col -= (self._roi[3] - self._roi[1]) / 4
-
-        return self._sub_wnd_coords[0] + sub_wnd_row, \
-               self._sub_wnd_coords[1] + sub_wnd_col
+        return (self._roi[0] + new_w, self._roi[1] + new_h,
+                self._roi[2] + new_w, self._roi[3] + new_h)
 
     def _find_gaussian_kernel(self, x, y):
         correlation = np.zeros([self._hog.hog_size[0], self._hog.hog_size[1]],
