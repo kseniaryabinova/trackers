@@ -34,9 +34,21 @@ class KCF:
         self._alpha = self._train(self._x_hog, True)
 
     def _make_y_values(self, w, h):
-        c = np.sqrt(w * h) / 15
+        def rearrange(arr):
+            mid_x = w // 2
+            mid_y = h // 2
 
-        result = np.zeros((w, h))
+            res = np.zeros((w, h), dtype=np.float32)
+            res[mid_x:mid_x * 2, mid_y:mid_y * 2] = arr[0:mid_x, 0:mid_y]
+            res[0:mid_x, 0:mid_y] = arr[mid_x:mid_x * 2, mid_y:mid_y * 2]
+            res[0:mid_x, mid_y:mid_y * 2] = arr[mid_x:mid_x * 2, 0:mid_y]
+            res[mid_x:mid_x * 2, 0:mid_y] = arr[0:mid_x, mid_y:mid_y * 2]
+
+            return res
+
+        c = np.sqrt(w * h) / 9
+
+        result = np.zeros((w, h), dtype=np.float32)
 
         mid_x = w // 2
         mid_y = h // 2
@@ -46,6 +58,7 @@ class KCF:
                 result[x, y] = np.exp(-((mid_x - x) ** 2 / (2 * c ** 2) +
                                         (mid_y - y) ** 2 / (2 * c ** 2)))
 
+        result = np.fft.fft(result) / result.shape[1]
         return result
 
     def _make_subwindow(self):
@@ -92,7 +105,7 @@ class KCF:
 
     def _train(self, new_hog, is_first_time):
         k = self._find_gaussian_kernel(new_hog, new_hog)
-        alpha = self._y / (np.fft.fft(k) + self._lambda)
+        alpha = self._y / (np.fft.fft(k) / k.shape[1] + self._lambda)
 
         show(np.real(k), 'train_kernel')
         show(np.real(alpha), 'train_alpha')
@@ -114,8 +127,7 @@ class KCF:
         show(np.real(k_xz), '_detect_k_xz')
         show(np.real(f_z), '_detect_correlation')
 
-        exit(0)
-        _, max_val, _, max_loc = cv2.minMaxLoc(f_z)
+        _, max_val, _, max_loc = cv2.minMaxLoc(f_z.real)
         print(max_val, max_loc)
         return self._get_coords(max_loc)
 
@@ -138,18 +150,6 @@ class KCF:
                self._sub_wnd_coords[1] + sub_wnd_col
 
     def _find_gaussian_kernel(self, x, y):
-        def rearrange(arr, w, h):
-            mid_x = w // 2
-            mid_y = h // 2
-
-            res = np.zeros((w, h), dtype=np.complex)
-            res[mid_x:mid_x * 2, mid_y:mid_y * 2] = arr[0:mid_x, 0:mid_y]
-            res[0:mid_x, 0:mid_y] = arr[mid_x:mid_x * 2, mid_y:mid_y * 2]
-            res[0:mid_x, mid_y:mid_y * 2] = arr[mid_x:mid_x * 2, 0:mid_y]
-            res[mid_x:mid_x * 2, 0:mid_y] = arr[0:mid_x, mid_y:mid_y * 2]
-
-            return res
-
         correlation = np.zeros([self._hog.hog_size[0], self._hog.hog_size[1]],
                                dtype=np.complex)
         for i in range(self._hog.hog_size[2]):
@@ -158,13 +158,9 @@ class KCF:
             result = np.multiply(np.conj(x_fft), y_fft)
             correlation = np.add(correlation, result)
 
-        correlation = rearrange(correlation,
-                                correlation.shape[1], correlation.shape[0])
-
         norm1 = np.multiply(x, x).sum()
         norm2 = np.multiply(y, y).sum()
-        result = (norm1 + norm2 -
-                  2 * np.real(np.fft.ifft(correlation))) / \
+        result = (norm1 + norm2 - 2 * np.real(np.fft.ifft(correlation))) / \
                  (self._hog.hog_size[0] * self._hog.hog_size[1] * self._hog.hog_size[2])
 
         return np.exp(-1 / (self._sigma ** 2) * result)
