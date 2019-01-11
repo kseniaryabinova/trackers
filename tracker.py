@@ -19,33 +19,21 @@ class KCF:
 
         self._roi = coords
         sub_wnd_coords = self._make_subwindow()
-        self._sub_wnd_size = (sub_wnd_coords[2] - sub_wnd_coords[0],
-                              sub_wnd_coords[3] - sub_wnd_coords[1])
+        self._sub_wnd_size = (sub_wnd_coords[3] - sub_wnd_coords[1],
+                              sub_wnd_coords[2] - sub_wnd_coords[0])
         self._sub_wnd_coords = sub_wnd_coords
 
         self._y = self._make_y_values(self._hog.hog_size[0],
                                       self._hog.hog_size[1])
 
         self._x_hog = self._hog.compute(image[
-                                        sub_wnd_coords[0]:sub_wnd_coords[2],
-                                        sub_wnd_coords[1]:sub_wnd_coords[3]
+                                        sub_wnd_coords[1]:sub_wnd_coords[3],
+                                        sub_wnd_coords[0]:sub_wnd_coords[2]
                                         ])
 
         self._alpha = self._train(self._x_hog, True)
 
     def _make_y_values(self, w, h):
-        def rearrange(arr):
-            mid_x = w // 2
-            mid_y = h // 2
-
-            res = np.zeros((w, h), dtype=np.float32)
-            res[mid_x:mid_x * 2, mid_y:mid_y * 2] = arr[0:mid_x, 0:mid_y]
-            res[0:mid_x, 0:mid_y] = arr[mid_x:mid_x * 2, mid_y:mid_y * 2]
-            res[0:mid_x, mid_y:mid_y * 2] = arr[mid_x:mid_x * 2, 0:mid_y]
-            res[mid_x:mid_x * 2, 0:mid_y] = arr[0:mid_x, mid_y:mid_y * 2]
-
-            return res
-
         c = np.sqrt(w * h) / 9
 
         result = np.zeros((w, h), dtype=np.float32)
@@ -116,16 +104,16 @@ class KCF:
                self._interp_factor * alpha
 
     def _detect(self, image):
-        # FIXME какой-то баг с корреляцией
         z_coords = self._make_subwindow()
-        z = image[z_coords[0]:z_coords[2], z_coords[1]:z_coords[3]]
+        # z = image[z_coords[0]:z_coords[2], z_coords[1]:z_coords[3]]
+        z = image[z_coords[1]:z_coords[3], z_coords[0]:z_coords[2]]
         z_hog = self._hog.compute(z)
 
         k_xz = self._find_gaussian_kernel(self._x_hog, z_hog)
         f_z = np.fft.ifft(np.multiply(np.fft.fft(k_xz), self._alpha))
 
-        # show(np.real(k_xz), '_detect_k_xz')
-        # show(np.real(f_z), '_detect_correlation')
+        show(np.real(k_xz), '_detect_k_xz')
+        show(np.real(f_z), '_detect_correlation')
 
         _, max_val, _, max_loc = cv2.minMaxLoc(f_z.real)
         print(max_val, max_loc)
@@ -135,12 +123,13 @@ class KCF:
         new_center = (max_loc[0] * self._hog.pixels_per_cell[0],
                       max_loc[1] * self._hog.pixels_per_cell[1])
 
-        scale = self._sub_wnd_size[0] / self._hog.wnd_size[0]
+        scale_x = self._sub_wnd_size[1] / self._hog.wnd_size[1]
+        scale_y = self._sub_wnd_size[0] / self._hog.wnd_size[0]
 
-        new_center = (new_center[0] * scale + self._sub_wnd_coords[0],
-                      new_center[1] * scale + self._sub_wnd_coords[1])
-        new_w = self.image_size[0] / 2 - new_center[0]
-        new_h = self.image_size[1] / 2 - new_center[1]
+        new_center = (new_center[0] * scale_x + self._sub_wnd_coords[0],
+                      new_center[1] * scale_y + self._sub_wnd_coords[1])
+        new_w = self._roi[0] + (self._roi[2] - self._roi[0]) // 2 - new_center[0]
+        new_h = self._roi[1] + (self._roi[3] - self._roi[1]) // 2 - new_center[1]
 
         return (self._roi[0] + new_w, self._roi[1] + new_h,
                 self._roi[2] + new_w, self._roi[3] + new_h)
