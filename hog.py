@@ -7,7 +7,7 @@ class HOG:
     def __init__(self, window_size=(256, 256)):
         # new_size = (32, 32)
         self.wnd_size = window_size
-        self.pixels_per_cell = (8, 8)
+        self.pixels_per_cell = (4, 4)
         self.orientations = 9
         self.hog_size = (
             self.wnd_size[0] // self.pixels_per_cell[0],  # rows
@@ -40,6 +40,6 @@ class HOG:
 
         new_shape = np.squeeze(h).shape
         h = np.reshape(h, new_shape)
-        h = np.multiply(h, self.hann)
+        # h = np.multiply(h, self.hann)
 
         return h

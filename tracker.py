@@ -85,8 +85,8 @@ class KCF:
         self._sub_wnd_coords = sub_wnd_coords
 
         self._x_hog = self._hog.compute(
-            image[sub_wnd_coords[0]:sub_wnd_coords[2],
-            sub_wnd_coords[1]:sub_wnd_coords[3]])
+            image[sub_wnd_coords[1]:sub_wnd_coords[3],
+                  sub_wnd_coords[0]:sub_wnd_coords[2]])
 
         self._alpha = self._train(self._x_hog, False)
         return self._roi
@@ -112,7 +112,7 @@ class KCF:
         k_xz = self._find_gaussian_kernel(self._x_hog, z_hog)
         f_z = np.fft.ifft(np.multiply(np.fft.fft(k_xz), self._alpha))
 
-        show(np.real(k_xz), '_detect_k_xz')
+        # show(np.real(k_xz), '_detect_k_xz')
         show(np.real(f_z), '_detect_correlation')
 
         _, max_val, _, max_loc = cv2.minMaxLoc(f_z.real)
@@ -128,8 +128,8 @@ class KCF:
 
         new_center = (new_center[0] * scale_x + self._sub_wnd_coords[0],
                       new_center[1] * scale_y + self._sub_wnd_coords[1])
-        new_w = self._roi[0] + (self._roi[2] - self._roi[0]) // 2 - new_center[0]
-        new_h = self._roi[1] + (self._roi[3] - self._roi[1]) // 2 - new_center[1]
+        new_w = new_center[0] - (self._roi[0] + (self._roi[2] - self._roi[0]) // 2)
+        new_h = new_center[1] - (self._roi[1] + (self._roi[3] - self._roi[1]) // 2)
 
         return (self._roi[0] + new_w, self._roi[1] + new_h,
                 self._roi[2] + new_w, self._roi[3] + new_h)
@@ -146,6 +146,6 @@ class KCF:
         norm1 = np.multiply(x, x).sum()
         norm2 = np.multiply(y, y).sum()
         result = (norm1 + norm2 - 2 * np.real(np.fft.ifft(correlation))) / \
-                 (self._hog.hog_size[0] * self._hog.hog_size[1] * self._hog.hog_size[2])
+                 (self._hog.hog_size[0] * self._hog.hog_size[1])
 
         return np.exp(-1 / (self._sigma ** 2) * result)

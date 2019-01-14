@@ -1,6 +1,7 @@
 import cv2
 from tracker import KCF
 from bindings_to_tests import Tests
+from utils import create_video
 
 
 def test_on_img_png():
@@ -10,6 +11,20 @@ def test_on_img_png():
     for _ in range(30):
         img = cv2.imread('img.png')
         bbox = tracker.update(img)
+        cv2.rectangle(img, (bbox[0], bbox[1]), (bbox[2], bbox[3]),
+                      color=(255, 0, 0), thickness=5)
+        cv2.imshow('1', img)
+        cv2.waitKey(0)
+
+
+def test_on_frames_dir():
+    img = cv2.imread('frames/000.png')
+    tracker = KCF(img, (200, 200, 300, 300))
+
+    for i in range(1, 30):
+        img = cv2.imread('frames/{:03d}.png'.format(i))
+        bbox = tracker.update(img)
+        print(bbox)
         cv2.rectangle(img, (bbox[0], bbox[1]), (bbox[2], bbox[3]),
                       color=(255, 0, 0), thickness=5)
         cv2.imshow('1', img)
@@ -47,4 +62,4 @@ def test_cfnet_validation():
 
 
 if __name__ == "__main__":
-    pass
+    test_cfnet_validation()
